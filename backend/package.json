@@ -12,7 +12,12 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["password-reset", "express", "mongodb", "typescript"],
+  "keywords": [
+    "password-reset",
+    "express",
+    "mongodb",
+    "typescript"
+  ],
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -24,6 +29,7 @@
     "mongoose": "^8.14.0",
     "morgan": "^1.10.0",
     "nodemailer": "^6.10.1",
+    "resend": "^6.18.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {

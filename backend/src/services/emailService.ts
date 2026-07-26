@@ -1,44 +1,62 @@
 import nodemailer, { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 import { env } from '../config/env';
+
+/**
+ * Email delivery strategy (in priority order):
+ * 1. Resend HTTP API   — when RESEND_API_KEY is set (works on Render, no SMTP ports needed)
+ * 2. SMTP (nodemailer) — when real SMTP credentials are configured
+ * 3. Ethereal          — development fallback, logs a preview URL instead of sending
+ */
+
+const hasRealResendKey =
+  !!env.RESEND_API_KEY && !env.RESEND_API_KEY.includes('your_api_key');
+
+const resend = hasRealResendKey ? new Resend(env.RESEND_API_KEY) : null;
 
 let transporterPromise: Promise<Transporter> | null = null;
 
-function looksLikePlaceholderSmtp(): boolean {
+function hasUsableSmtpConfig(): boolean {
+  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
+    return false;
+  }
+
   const user = env.SMTP_USER.toLowerCase();
   const pass = env.SMTP_PASS.toLowerCase();
-  return (
+  const isPlaceholder =
     user.includes('your-email') ||
     pass.includes('your-app-password') ||
     pass === 'password' ||
-    pass === 'changeme'
-  );
+    pass === 'changeme';
+
+  return !isPlaceholder;
 }
 
 async function createTransporter(): Promise<Transporter> {
-  // In development, fall back to Ethereal so the flow is testable without real SMTP.
-  if (env.NODE_ENV === 'development' && looksLikePlaceholderSmtp()) {
-    const testAccount = await nodemailer.createTestAccount();
-    console.log('Using Ethereal test SMTP account for development email delivery');
-    console.log(`Ethereal user: ${testAccount.user}`);
-
+  if (hasUsableSmtpConfig()) {
     return nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
       auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
+        user: env.SMTP_USER,
+        pass: env.SMTP_PASS,
       },
     });
   }
 
+  // Development fallback so the flow stays testable without real credentials.
+  const testAccount = await nodemailer.createTestAccount();
+  console.log('Using Ethereal test SMTP account for development email delivery');
+  console.log(`Ethereal user: ${testAccount.user}`);
+
   return nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_SECURE,
+    host: testAccount.smtp.host,
+    port: testAccount.smtp.port,
+    secure: testAccount.smtp.secure,
     auth: {
-      user: env.SMTP_USER,
-      pass: env.SMTP_PASS,
+      user: testAccount.user,
+      pass: testAccount.pass,
     },
   });
 }
@@ -51,13 +69,18 @@ async function getTransporter(): Promise<Transporter> {
 }
 
 export async function verifyMailTransport(): Promise<void> {
+  if (resend) {
+    console.log('Email delivery: Resend API (RESEND_API_KEY detected)');
+    return;
+  }
+
   try {
     const transporter = await getTransporter();
     await transporter.verify();
-    console.log('Email transport verified successfully');
+    console.log('Email delivery: SMTP transport verified successfully');
   } catch (error) {
     console.warn(
-      'Email transport verification failed. Password reset emails may not send until SMTP is configured correctly.',
+      'Email transport verification failed. Password reset emails may not send until RESEND_API_KEY or SMTP is configured correctly.',
     );
     console.warn(error);
   }
@@ -69,12 +92,7 @@ interface SendPasswordResetEmailOptions {
   resetToken: string;
 }
 
-export async function sendPasswordResetEmail({
-  to,
-  name,
-  resetToken,
-}: SendPasswordResetEmailOptions): Promise<void> {
-  const transporter = await getTransporter();
+function buildResetEmail({ to, name, resetToken }: SendPasswordResetEmailOptions) {
   const resetUrl = `${env.CLIENT_URL}/reset-password/${resetToken}`;
   const expiryMinutes = env.RESET_TOKEN_EXPIRY_MINUTES;
 
@@ -98,15 +116,33 @@ export async function sendPasswordResetEmail({
     </div>
   `;
 
-  const info = await transporter.sendMail({
-    from: env.EMAIL_FROM.includes('your-email')
-      ? '"SecureReset" <noreply@securereset.dev>'
-      : env.EMAIL_FROM,
+  return {
+    from: env.EMAIL_FROM,
     to,
     subject: 'Reset your password',
     text: `Hello ${name},\n\nReset your password using this link (expires in ${expiryMinutes} minutes):\n${resetUrl}\n\nIf you did not request this, ignore this email.`,
     html,
-  });
+  };
+}
+
+export async function sendPasswordResetEmail(
+  options: SendPasswordResetEmailOptions,
+): Promise<void> {
+  const message = buildResetEmail(options);
+
+  if (resend) {
+    const { data, error } = await resend.emails.send(message);
+
+    if (error) {
+      throw new Error(`Resend API error: ${error.message}`);
+    }
+
+    console.log(`Password reset email sent via Resend (id: ${data?.id})`);
+    return;
+  }
+
+  const transporter = await getTransporter();
+  const info = await transporter.sendMail(message);
 
   const previewUrl = nodemailer.getTestMessageUrl(info);
   if (previewUrl) {

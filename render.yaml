@@ -17,15 +17,8 @@ services:
         sync: false
       - key: RESET_TOKEN_EXPIRY_MINUTES
         value: "15"
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_SECURE
-        value: "false"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
+      # Resend HTTP API — SMTP ports are blocked on Render's free tier
+      - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
-        sync: false
+        value: "SecureReset <onboarding@resend.dev>"
