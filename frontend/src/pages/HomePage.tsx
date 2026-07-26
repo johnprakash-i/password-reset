@@ -14,10 +14,6 @@ export default function HomePage() {
               <h1 className="display-5 fw-bold mb-3">
                 Password reset with email verification
               </h1>
-              <p className="lead text-secondary mb-4">
-                Register an account, request a reset link, and update your password through a
-                time-limited token stored securely in MongoDB.
-              </p>
               <div className="d-flex flex-wrap gap-3">
                 <Link to="/register" className="btn btn-primary btn-lg">
                   Get started
